@@ -32,7 +32,9 @@ import microsoft.exchange.webservices.data.misc.AsyncRequestResult;
 import microsoft.exchange.webservices.data.misc.CallableMethod;
 import microsoft.exchange.webservices.data.misc.IAsyncResult;
 
+import javax.xml.stream.XMLStreamException;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Future;
 
@@ -60,7 +62,10 @@ public abstract class SimpleServiceRequestBase<T> extends ServiceRequestBase<T> 
 
     try {
       response = this.validateAndEmitRequest();
-      return this.readResponse(response);
+      return this.readResponse(response, ServiceRequestBase.getResponseStream(response));
+    } catch (XMLStreamException e) {
+      // Guy: My code is this function only
+      return handleParseErrorException(e, response);
     } catch (IOException ex) {
       // Wrap exception.
       throw new ServiceRequestException(String.
@@ -75,6 +80,34 @@ public abstract class SimpleServiceRequestBase<T> extends ServiceRequestBase<T> 
     }
   }
 
+  private T handleParseErrorException(Exception e, HttpWebRequest response) throws Exception {
+    if (e.getMessage().contains("ParseError at")) {
+      // Guy: We will get this exception if the xml will contain non-valid characters.
+      // Clients can send emails with non-valid characters but EWS library will pass them as-is - without cleaning/replacing
+      // them. To solve this, we will make another request and we will wrap the response InputStream with our ReplacingInputStream
+      // which will remove (maybe at the future we will do replacements) the non-valid characters.
+      try {
+        response = this.validateAndEmitRequest();
+        InputStream is = ServiceRequestBase.getResponseStream(response);
+        is = new ReplacingInputStream(is);
+        return this.readResponse(response, is);
+      } catch (IOException ex) {
+        // Wrap exception.
+        throw new ServiceRequestException(String.
+            format("The request failed. %s", ex.getMessage()), ex);
+      } catch (Exception ex) {
+        e = ex;
+      }
+    }
+
+    if (response != null) {
+      this.getService().processHttpResponseHeaders(TraceFlags.
+                                                       EwsResponseHttpHeaders, response);
+    }
+
+    throw new ServiceRequestException(String.format("The request failed. %s", e.getMessage()), e);
+  }
+
   /**
    * Ends executing this async request.
    *
@@ -84,7 +117,7 @@ public abstract class SimpleServiceRequestBase<T> extends ServiceRequestBase<T> 
    */
   protected T endInternalExecute(IAsyncResult asyncResult) throws Exception {
     HttpWebRequest response = (HttpWebRequest) asyncResult.get();
-    return this.readResponse(response);
+    return this.readResponse(response, response.getInputStream());
   }
 
   /**

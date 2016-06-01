@@ -364,7 +364,7 @@ public abstract class ServiceRequestBase<T> {
    * @return response response object
    * @throws Exception on error
    */
-  protected T readResponse(HttpWebRequest response) throws Exception {
+  protected T readResponse(HttpWebRequest response, InputStream inputStream) throws Exception {
     T serviceResponse;
 
     if (!response.getResponseContentType().startsWith("text/xml")) {
@@ -382,23 +382,21 @@ public abstract class ServiceRequestBase<T> {
 
       if (this.getService().isTraceEnabledFor(TraceFlags.EwsResponse)) {
         ByteArrayOutputStream memoryStream = new ByteArrayOutputStream();
-        InputStream serviceResponseStream = ServiceRequestBase.getResponseStream(response);
 
-        int data = serviceResponseStream.read();
+        int data = inputStream.read();
         while (data != -1) {
           memoryStream.write(data);
-          data = serviceResponseStream.read();
+          data = inputStream.read();
         }
 
         this.traceResponse(response, memoryStream);
         ByteArrayInputStream memoryStreamIn = new ByteArrayInputStream(memoryStream.toByteArray());
         EwsServiceXmlReader ewsXmlReader = new EwsServiceXmlReader(memoryStreamIn, this.getService());
         serviceResponse = this.readResponse(ewsXmlReader);
-        serviceResponseStream.close();
+        inputStream.close();
         memoryStream.flush();
       } else {
-        InputStream responseStream = ServiceRequestBase.getResponseStream(response);
-        EwsServiceXmlReader ewsXmlReader = new EwsServiceXmlReader(responseStream, this.getService());
+        EwsServiceXmlReader ewsXmlReader = new EwsServiceXmlReader(inputStream, this.getService());
         serviceResponse = this.readResponse(ewsXmlReader);
       }
 
